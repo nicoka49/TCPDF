@@ -1,7 +1,7 @@
 {
     "name": "nicoka49/tcpdf",
     "type": "library",
-    "description": "TCPDF is a PHP class for generating PDF documents and barcodes.",
+    "description": "TCPDF is a PHP  for generating PDF documents and barcodes.",
     "keywords": [
         "PDF",
         "tcpdf",
