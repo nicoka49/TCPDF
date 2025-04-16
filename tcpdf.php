@@ -1865,6 +1865,13 @@ class TCPDF {
 	 */
 	protected $allowLocalFiles = false;
 
+	
+	/**
+	 * @XVI+
+	 */
+	protected $temporaryImageFiles = [];
+
+
 	//------------------------------------------------------------
 	// METHODS
 	//------------------------------------------------------------
@@ -6960,6 +6967,7 @@ class TCPDF {
 		if ($file[0] === '@') {
 			// image from string
 			$imgdata = substr($file, 1);
+			$fileUid = md5($imgdata);
 		} else { // image file
 			if ($file[0] === '*') {
 				// image as external stream
@@ -6970,6 +6978,7 @@ class TCPDF {
 			if (!@$this->fileExists($file)) {
 				return false;
 			}
+			$fileUid = md5_file($file);
             if (false !== $info = $this->getImageBuffer($file)) {
                 $imsize = array($info['w'], $info['h']);
             } elseif (($imsize = @getimagesize($file)) === FALSE && strpos($file, '__tcpdf_'.$this->file_id.'_img') === FALSE){
@@ -6977,21 +6986,29 @@ class TCPDF {
             }
 		}
 		if (!empty($imgdata)) {
-			// copy image to cache
-			$original_file = $file;
-			$file = TCPDF_STATIC::getObjFilename('img', $this->file_id);
-			$fp = TCPDF_STATIC::fopenLocal($file, 'w');
-			if (!$fp) {
-				$this->Error('Unable to write file: '.$file);
+			if(!empty($this->temporaryImageFiles[$fileUid])) {
+				$file = $this->temporaryImageFiles[$fileUid];
+				$imsize = @getimagesize($file);
+			} else {
+				// copy image to cache
+				$original_file = $file;
+				$file = TCPDF_STATIC::getObjFilename('img', $this->file_id);
+				$fp = TCPDF_STATIC::fopenLocal($file, 'w');
+				if (!$fp) {
+					$this->Error('Unable to write file: '.$file);
+				}
+				fwrite($fp, $imgdata);
+				fclose($fp);
+				unset($imgdata);
+				$imsize = @getimagesize($file);
+				if ($imsize === FALSE) {
+					unlink($file);
+					$file = $original_file;
+				} else {
+					$this->temporaryImageFiles[$fileUid] = $file;
+				}
 			}
-			fwrite($fp, $imgdata);
-			fclose($fp);
-			unset($imgdata);
-			$imsize = @getimagesize($file);
-			if ($imsize === FALSE) {
-				unlink($file);
-				$file = $original_file;
-			}
+
 		}
 		if ($imsize === FALSE) {
 			if (($w > 0) AND ($h > 0)) {
@@ -7351,6 +7368,9 @@ class TCPDF {
 		$tempfile_alpha = K_PATH_CACHE.'__tcpdf_'.$this->file_id.'_imgmask_alpha_'.$filehash;
 		$parsed = false;
 		$parse_error = '';
+		if(!empty($this->temporaryImageFiles[$this->file_id.'__plain_'.$filehash]) && !empty($this->temporaryImageFiles[$this->file_id.'__alpha_'.$filehash])) {
+			$parsed = true;
+		}
 		// ImageMagick extension
 		if (($parsed === false) AND extension_loaded('imagick')) {
 			try {
@@ -7368,6 +7388,7 @@ class TCPDF {
 				}
 				$img->setImageFormat('png');
 				$img->writeImage($tempfile_alpha);
+				$this->temporaryImageFiles[$this->file_id.'__alpha_'.$filehash] = $tempfile_alpha;
 				// remove alpha channel
 				if (method_exists($imga, 'setImageMatte')) {
 					$imga->setImageMatte(false);
@@ -7377,6 +7398,7 @@ class TCPDF {
 				$imga->setImageFormat('png');
 				$imga->writeImage($tempfile_plain);
 				$parsed = true;
+				$this->temporaryImageFiles[$this->file_id.'__plain_'.$filehash] = $tempfile_plain;
 			} catch (Exception $e) {
 				// Imagemagick fails, try with GD
 				$parse_error = 'Imagick library error: '.$e->getMessage();
@@ -7409,6 +7431,9 @@ class TCPDF {
 				imagepng($imgplain, $tempfile_plain);
 				imagedestroy($imgplain);
 				$parsed = true;
+				$this->temporaryImageFiles[$this->file_id.'__alpha_'.$filehash] = $tempfile_alpha;
+				$this->temporaryImageFiles[$this->file_id.'__plain_'.$filehash] = $tempfile_plain;
+
 			} catch (Exception $e) {
 				// GD fails
 				$parse_error = 'GD library error: '.$e->getMessage();
@@ -7841,6 +7866,7 @@ class TCPDF {
 	}
 
 	protected static $cleaned_ids = array();
+	
 	/**
 	 * Unset all class variables except the following critical variables.
 	 * @param boolean $destroyall if true destroys all class variables, otherwise preserves critical variables.
@@ -7854,18 +7880,18 @@ class TCPDF {
 		}
 		if ($destroyall AND !$preserve_objcopy && isset($this->file_id)) {
 			self::$cleaned_ids[$this->file_id] = true;
-			// remove all temporary files
-			if ($handle = @opendir(K_PATH_CACHE)) {
-				while ( false !== ( $file_name = readdir( $handle ) ) ) {
-					if (strpos($file_name, '__tcpdf_'.$this->file_id.'_') === 0) {
-						unlink(K_PATH_CACHE.$file_name);
-					}
+			if (isset($this->imagekeys)) {
+				foreach($this->temporaryImageFiles as $file) {
+					@unlink($file); 
 				}
-				closedir($handle);
+			}
+			$pattern = K_PATH_CACHE . '__tcpdf_' . $this->file_id . '_*';
+			foreach (glob($pattern) as $tmp_file) {
+				unlink($tmp_file);
 			}
 			if (isset($this->imagekeys)) {
 				foreach($this->imagekeys as $file) {
-					if (strpos($file, K_PATH_CACHE) === 0 && TCPDF_STATIC::file_exists($file)) {
+					if (strpos($file,K_PATH_CACHE) === 0 && TCPDF_STATIC::file_exists($file)) {
 						@unlink($file);
 					}
 				}
@@ -7882,6 +7908,7 @@ class TCPDF {
 			'signature_data',
 			'signature_max_length',
 			'byterange_string',
+			'temporaryImageFiles',
 			'tsa_timestamp',
 			'tsa_data'
 		);
