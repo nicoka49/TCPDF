@@ -5484,7 +5484,7 @@ class TCPDF {
 			$ns = substr_count($txt, chr(32));
 			// Justification
 			$spacewidth = 0;
-			if (($align == 'J') AND ($ns > 0)) {
+			if (($align == 'J') AND ($ns > 8)) {
 				if ($this->isUnicodeFont()) {
 					// get string width without spaces
 					$width = $this->GetStringWidth(str_replace(' ', '', $txt));
